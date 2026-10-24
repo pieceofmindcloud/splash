@@ -464,8 +464,10 @@ std::array<uint8_t, 32> parseSha256(std::string_view value) {
 } // namespace
 
 void requireLoadedModel(const model::LoadedModel &loaded) {
+  // A slice that does not end the model loads no draft weights.
+  const bool drafts = std::visit([](const auto &layout) { return layout.hasHead(); }, loaded.descriptor.target);
   if (!loaded.targetActualAllocatedBytes() ||
-      !loaded.draft.actualAllocatedBytes ||
+      (drafts && !loaded.draft.actualAllocatedBytes) ||
       (loaded.descriptor.hasVision() && !loaded.vision.actualAllocatedBytes) ||
       loaded.manifestFingerprintSha256.empty() ||
       loaded.targetManifestFingerprint().empty()) {
