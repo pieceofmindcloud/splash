@@ -41,7 +41,8 @@ StageClient::StageClient(StageSocket socket, std::string_view secret, uint32_t f
   hello.u8(kStageHello);
   hello.text(secret);
   hello.u32(firstLayer);
-  StageReader answer(call(hello));
+  const std::vector<uint8_t> greeting = call(hello);
+  StageReader answer(greeting);
   const uint32_t first = answer.u32(), end = answer.u32();
   if (end != firstLayer)
     throw StageLinkError("the previous stage runs layers " + std::to_string(first) + " to " +
