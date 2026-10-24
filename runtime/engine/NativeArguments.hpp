@@ -73,6 +73,14 @@ struct NativeArguments final {
   // --verify-rows auto|all: the rows of the draft's block a decode
   // cycle verifies (RuntimeResourcesConfig::verifyRows).
   model::VerifyRows verifyRows = model::VerifyRows::Auto;
+  // --stage-serve PORT: the model holds the first layers of a split model;
+  // the process serves the stage after it on 127.0.0.1:PORT
+  // (engine::StageServant) instead of the native protocol. --stage-previous
+  // PORT: the model's layers do not begin the model; the stage before it
+  // serves on 127.0.0.1:PORT. Zero for none; the link's secret is
+  // SPLASH_STAGE_SECRET's.
+  uint16_t stageServe = 0;
+  uint16_t stagePrevious = 0;
 };
 
 // Reads `serve-native MODEL_DIRECTORY MAX_CONTEXT|auto MAX_MEMORY_BYTES|auto

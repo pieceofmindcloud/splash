@@ -106,6 +106,9 @@ struct RuntimeBootstrapConfig {
     // plan holds, as serve's default; another one larger than the plan
     // holds fails the bootstrap.
     NativeLoopConfig nativeLoop;
+    // The stage before a target whose layers do not begin the model
+    // (model::RuntimeContext::stagePrevious).
+    std::shared_ptr<model::StagePrevious> stagePrevious;
 };
 
 using ActualMemoryReporter = std::function<ActualMemoryReport()>;

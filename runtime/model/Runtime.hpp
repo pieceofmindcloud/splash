@@ -1,6 +1,7 @@
 #pragma once
 
 #include "model/ModelFactory.hpp"
+#include "model/StagePrevious.hpp"
 
 #include <cstdint>
 #include <memory>
@@ -69,6 +70,31 @@ public:
 
   [[nodiscard]] ModelTelemetry
   telemetry() const noexcept override;
+
+  // A stage servant's sequences (engine::StageServant): the runtime of a
+  // target whose layers do not end the model computes, for the stage after
+  // it, the residual rows its last layer leaves. A sequence has a lane and
+  // its K/V pages, which its caller keeps (`pages`, for its rows); it never
+  // drafts nor selects.
+  //
+  // Begins sequence `requestId` at a free lane, or refuses as begin() does.
+  [[nodiscard]] StateAdmission beginStage(uint64_t requestId);
+  // The tokens the sequence has read, its committed length.
+  [[nodiscard]] std::span<const uint32_t> stageTokens(uint64_t requestId);
+  // Reads `tokens` at the sequence's end, in commands of one prefill chunk,
+  // and returns their rows and the captured rows of `captures` (inside
+  // them, in order); `pages` the sequence's pages for them all.
+  [[nodiscard]] StageRows stagePrefill(uint64_t requestId, std::span<const uint32_t> tokens,
+                                       const ModelBatchItem &pages, std::span<const StageCaptureSpan> captures);
+  // One verify of each lane's tokens at its end (StageVerifyLane: the lane's
+  // previous verify was committed with stageCommit), in one command: their
+  // rows and captured rows, lane after lane. The rows stay pending until
+  // stageCommit() keeps the first `retained` of them; `pages` holds each
+  // lane's pages for its rows.
+  [[nodiscard]] StageRows stageVerify(std::span<const StageVerifyLane> lanes,
+                                      std::span<const ModelBatchItem> pages);
+  // Keeps the first `retained` rows of the sequence's last verify.
+  void stageCommit(uint64_t requestId, uint32_t retained);
 
 private:
   // The state lane of a resident request; the storage checks that its

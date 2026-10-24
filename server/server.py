@@ -1695,6 +1695,8 @@ def _native_command(args, model_root, relaunch_context=None):
         )
     if args.allow_idle_sleep:
         command.extend(("--idle-sleep", "allow"))
+    if args.stage_previous is not None:
+        command.extend(("--stage-previous", str(args.stage_previous)))
     if relaunch_context is not None and args.max_context is None:
         command.extend(("--relaunch-context", str(relaunch_context)))
     for flag, value in (

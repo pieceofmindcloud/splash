@@ -1261,6 +1261,7 @@ model::RuntimeContext RuntimeResources::modelContext() noexcept {
       blockCache_.get(),
       historyStream_.get(),
       verifyRows_,
+      {},
   };
 }
 

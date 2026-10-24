@@ -25,7 +25,12 @@ struct QwenTargetDimensions {
   // runtime's KV ceiling (kv::kMaximumLogicalTokens).
   uint32_t nativeContextTokens = 0;
   uint32_t yarnContextTokens = 0;
+  // The layers this target runs: all of the model's, or a slice of them
+  // (firstLayer onward, of totalLayers), whose layer `index` is the model's
+  // layer firstLayer + index (sliced). Zero totalLayers means the whole model.
   uint32_t layers = 0;
+  uint32_t firstLayer = 0;
+  uint32_t totalLayers = 0;
   uint32_t hiddenSize = 0;
   uint32_t vocabularySize = 0;
   uint32_t packedGdnWidth = 0;
@@ -77,12 +82,31 @@ struct QwenTargetDimensions {
   uint32_t pleHeadDimension = 0;
   uint32_t pleConvolutionTaps = 0;
 
+  // Whether the target's layer `layer` (the model's firstLayer + layer) is
+  // full attention: every fullAttentionPeriod-th layer of the model.
   [[nodiscard]] constexpr bool
   isFullAttentionLayer(uint32_t layer) const noexcept {
-    return fullAttentionPeriod && (layer + 1) % fullAttentionPeriod == 0;
+    return fullAttentionPeriod && (firstLayer + layer + 1) % fullAttentionPeriod == 0;
   }
   [[nodiscard]] constexpr uint32_t attentionLayerCount() const noexcept {
-    return fullAttentionPeriod ? layers / fullAttentionPeriod : 0;
+    if (!fullAttentionPeriod) return 0;
+    return (firstLayer + layers) / fullAttentionPeriod - firstLayer / fullAttentionPeriod;
+  }
+  // The model's layer count, the target's layers being a slice of them or
+  // all of them.
+  [[nodiscard]] constexpr uint32_t modelLayers() const noexcept {
+    return totalLayers ? totalLayers : layers;
+  }
+  // A target that runs a slice of the model's layers: it embeds tokens only
+  // when the slice begins the model, and holds the head only when it ends it.
+  [[nodiscard]] constexpr bool sliced() const noexcept { return layers != modelLayers(); }
+  [[nodiscard]] constexpr bool embedsTokens() const noexcept { return firstLayer == 0; }
+  [[nodiscard]] constexpr bool hasHead() const noexcept { return firstLayer + layers == modelLayers(); }
+  // Narrows whole-model dimensions to the model's layers [first, end).
+  constexpr void restrictLayers(uint32_t first, uint32_t end) noexcept {
+    totalLayers = modelLayers();
+    firstLayer = first;
+    layers = end - first;
   }
   [[nodiscard]] constexpr uint32_t actualGdnWidth() const noexcept {
     return convolutionDimension + attentionWidth + 2 * gdnValueHeads;

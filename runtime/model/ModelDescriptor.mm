@@ -629,7 +629,7 @@ DFlashDraftLayout readDraftLayout(NSDictionary *draft, const QwenTargetDimension
   for (id value : ids) {
     targetLayers.push_back(
         requireWhole(value, "draft config target_layer_ids " + std::to_string(targetLayers.size())));
-    if (targetLayers.back() >= target.layers)
+    if (targetLayers.back() >= target.modelLayers())
       throw std::invalid_argument("draft config target_layer_ids names a layer past the target's");
   }
   const DFlashDraftLayout layout =
@@ -661,6 +661,28 @@ void validateVisionConfig(NSDictionary *vision, const ops::VisionLayout &layout,
                sourceName(source), "vision config hidden_act");
   if (requireArray(vision, @"deepstack_visual_indexes", "vision config deepstack_visual_indexes").count)
     throw std::invalid_argument("vision deepstack layers are unsupported");
+}
+
+// A GGUF target that holds a slice of the model's layers, as its text
+// config's layer_slice states it: {"first", "end"}, the model's layers
+// [first, end), which the GGUF numbers from 0 (gguf::requireMetadata holds its
+// block_count to them). The slice keeps at least one full-attention layer; a
+// family whose layers share tables beyond the slice (a PLE embedding or a QSA
+// indexer) is refused.
+template <class Layout>
+void restrictToSlice(NSDictionary *text, Layout &layout, TargetSource source) {
+  if (source != TargetSource::Gguf) throw std::invalid_argument("only a GGUF target holds a layer slice");
+  if (layout.hasPle() || layout.hasIndexer())
+    throw std::invalid_argument(std::string(layout.family) + " does not run a slice of its layers");
+  NSDictionary *slice = requireObject(text, @"layer_slice", "text config layer_slice");
+  const uint32_t first = requireWhole(slice[@"first"], "text config layer_slice first");
+  const uint32_t end = requireWhole(slice[@"end"], "text config layer_slice end");
+  if (first >= end || end > layout.layers)
+    throw std::invalid_argument("text config layer_slice [" + std::to_string(first) + ", " + std::to_string(end) +
+                                ") is not a range of the model's " + std::to_string(layout.layers) + " layers");
+  layout.restrictLayers(first, end);
+  if (!layout.attentionLayerCount())
+    throw std::invalid_argument("a layer slice holds at least one full-attention layer");
 }
 
 // The descriptor, named name, of an upstream model of the family its text
@@ -708,6 +730,7 @@ ModelDescriptor describeSourceModel(std::string name, std::string_view targetFor
     if (targetSource == TargetSource::Safetensors) requireQuantization(config, layout);
     if (targetSource == TargetSource::Gguf && layout.ffnKind == QwenFfnKind::SparseMoe)
       layout.experts = ggufRoutedExperts(text, layout);
+    if (text[@"layer_slice"]) restrictToSlice(text, layout, targetSource);
     if (draft) dflashLayout = readDraftLayout(draft, layout);
   }, *target);
   ModelDescriptor result = makeModelDescriptor(std::move(name), *target, dflashLayout,
@@ -812,7 +835,7 @@ bool ModelDescriptor::valid() const noexcept {
                (!capabilities.sparseKv || capabilities.sparseKv->blockTokens == SPLASH_ATTENTION_BLOCK_TOKENS) &&
                layout.hiddenSize == draft.hiddenSize &&
                draft.targetLayerCount && draft.targetLayerCount <= ExecutionLimits::maximumDraftTargetLayers &&
-               draft.targetLayers[draft.targetLayerCount - 1] < layout.layers &&
+               draft.targetLayers[draft.targetLayerCount - 1] < layout.modelLayers() &&
                layout.kvLayout() == targetKvLayout &&
                layout.gdnStateLayout() == stateLayout.target;
       },

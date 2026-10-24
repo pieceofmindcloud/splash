@@ -268,6 +268,9 @@ def _metadata_key(sources):
         "adapter": models.sha256(Path(gguf.__file__)),
         "tokenizers": version("tokenizers"),
     }
+    # The keys a layer slice is read by change what is derived.
+    if os.environ.get(gguf.LAYER_SLICE_KEYS):
+        identity["layer_slice_keys"] = os.environ[gguf.LAYER_SLICE_KEYS]
     return hashlib.sha256(models.json_bytes(identity)).hexdigest()
 
 
