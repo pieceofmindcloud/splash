@@ -410,7 +410,7 @@ std::optional<std::string> ModelMemoryProfile::validationError() const {
   if (spill.enabled && !targetKvLayout.spillable()) return "spill_plan_needs_a_spillable_layout";
   if (!ops::validFormat(stateFormat)) return "invalid_state_format";
   if (!footprint.targetWeightsBytes) return "target_weight_bytes_required";
-  if (!footprint.draftWeightsBytes) return "draft_weight_bytes_required";
+  // A slice that does not end the model loads no draft weights: zero bytes.
   if (!footprint.runtime.laneStatePlannedAllocatedBytes) {
     return "lane_state_bytes_required";
   }
