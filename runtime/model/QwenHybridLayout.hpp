@@ -102,6 +102,10 @@ struct QwenTargetDimensions {
   [[nodiscard]] constexpr bool sliced() const noexcept { return layers != modelLayers(); }
   [[nodiscard]] constexpr bool embedsTokens() const noexcept { return firstLayer == 0; }
   [[nodiscard]] constexpr bool hasHead() const noexcept { return firstLayer + layers == modelLayers(); }
+  // Whether the target holds the token table: to embed the prompt, or for
+  // the DFlash2 draft beside the head, which embeds its block's tokens with
+  // it.
+  [[nodiscard]] constexpr bool holdsTokenTable() const noexcept { return embedsTokens() || hasHead(); }
   // Narrows whole-model dimensions to the model's layers [first, end).
   constexpr void restrictLayers(uint32_t first, uint32_t end) noexcept {
     totalLayers = modelLayers();

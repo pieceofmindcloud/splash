@@ -39,7 +39,7 @@ GgufTargetLoader::GgufTargetLoader(metal::MetalBackend &backend, WeightImages &i
                        {.streamExperts = experts.memoryBytes != 0, .streamTable = table.cacheBytes != 0});
   planned_->layers = geometry.layers;
   planned_->head = geometry.hasHead();
-  planned_->embedding = geometry.embedsTokens();
+  planned_->embedding = geometry.holdsTokenTable();
   planned_->table = table;
   planned_->experts = experts;
 }
@@ -99,7 +99,7 @@ WeightFile GgufTargetLoader::head() {
 }
 
 WeightFile GgufTargetLoader::embedding() {
-  if (!planned_->embedding) throw GgufError("the target's layers do not begin the model: it has no token table");
+  if (!planned_->embedding) throw GgufError("the target's layers neither begin nor end the model: it has no token table");
   return open(planned_->layers + planned_->head);
 }
 

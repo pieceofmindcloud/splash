@@ -672,10 +672,11 @@ def loaded_tensors(metadata):
     period = metadata.positive(arch + ".full_attention_interval")
     tensors = dict(architecture.model_tensors)
     # A layer slice's layer is the model's first + layer; it holds the token
-    # table only when it begins the model, and the head only when it ends it.
+    # table when it begins the model or ends it (the DFlash2 draft beside the
+    # head embeds with it), and the head only when it ends it.
     sliced = layer_slice(metadata)
     first = sliced.first if sliced else 0
-    if sliced and not sliced.embeds_tokens:
+    if sliced and not sliced.embeds_tokens and not sliced.has_head:
         tensors.pop("token_embd.weight")
     if sliced and not sliced.has_head:
         for name in ("output_norm.weight", "output.weight"):

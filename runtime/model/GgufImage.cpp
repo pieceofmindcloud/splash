@@ -536,14 +536,14 @@ std::vector<Image> familyImages(const GgufFile &file, const QwenTargetDimensions
     images.push_back(layer.finish());
   }
   // A slice of the model's layers holds the head only when it ends the
-  // model, and the token table only when it begins it.
+  // model, and the token table when it begins it or holds the head.
   if (g.hasHead()) {
     Builder head(file, g, problems, "head.bin", g.layers, 2);
     Family::head(head, g);
     head.quantized("output.weight", g.vocabularySize, g.hiddenSize);
     images.push_back(head.finish());
   }
-  if (g.embedsTokens()) {
+  if (g.holdsTokenTable()) {
     Builder embedding(file, g, problems, "embedding.bin", g.vocabularySize, g.hiddenSize);
     embedding.embeddingRows("token_embd.weight");
     images.push_back(embedding.finish());
