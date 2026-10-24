@@ -330,6 +330,11 @@ int runStageServant(const engine::NativeArguments &arguments) {
   auto *stages = dynamic_cast<model::Runtime *>(runtime.get());
   if (!stages) throw std::logic_error("the model's runtime runs no stage sequences");
   resources->beginServing();
+  // Everything the servant allocates is a request's in service (the stage
+  // after holds it): the host's margins hold back none of it, as they do
+  // not an engine's request (engine::Serving); the budget and critical
+  // pressure still refuse it.
+  static_cast<void>(resources->memoryGovernor().setServing(true));
   const auto [first, end] = targetLayers(arguments.model);
   engine::StageServant servant(*stages, resources->cache(), stageSecret(), first, end);
   std::signal(SIGPIPE, SIG_IGN);

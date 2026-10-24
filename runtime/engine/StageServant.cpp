@@ -212,7 +212,11 @@ void StageServant::serve(StageSocket &socket) {
 void StageServant::open(uint64_t requestId) {
   if (live_.contains(requestId)) return;
   const StateAdmission admission = runtime_.beginStage(requestId);
-  if (!admission.granted()) throw std::runtime_error("the previous stage has no free lane");
+  if (!admission.granted())
+    throw std::runtime_error(admission.failure == StateFailure::ConcurrencyLimit
+                                 ? std::string("the previous stage has no free lane")
+                                 : std::string("the previous stage has no memory for a lane: ") +
+                                       metal::allocationFailureName(admission.allocationFailure));
   cache_.beginRequest(requestId);
   live_.insert(requestId);
   if (opened_) opened_->insert(requestId);
@@ -226,7 +230,9 @@ void StageServant::drop(uint64_t requestId) noexcept {
 
 ModelBatchItem StageServant::pages(uint64_t requestId, uint64_t tokens) {
   const TokenAdmission admission = cache_.ensureTokens(requestId, tokens);
-  if (!admission.granted()) throw std::runtime_error("the previous stage has no K/V pages for the request");
+  if (!admission.granted())
+    throw std::runtime_error(std::string("the previous stage has no K/V pages for the request: ") +
+                             metal::allocationFailureName(admission.allocationFailure));
   const PageTableView view = cache_.cutPageTable(requestId);
   ModelBatchItem item;
   item.requestId = requestId;
