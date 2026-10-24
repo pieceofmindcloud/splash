@@ -357,10 +357,10 @@ def loaded_layers(metadata, arch):
 
 
 # The environment variable that names the metadata keys of a layer slice: a
-# GGUF that holds the model's layers [START, END) of ORIGINAL, numbered from 0,
-# states them as PREFIX.start_layer, PREFIX.end_layer and
-# PREFIX.original_block_count, PREFIX being its value. Unset, every GGUF is a
-# whole model.
+# GGUF that holds the model's layers START to LAST (inclusive) of ORIGINAL,
+# numbered from 0, states them as PREFIX.start_layer, PREFIX.end_layer (LAST)
+# and PREFIX.original_block_count, PREFIX being its value. Unset, every GGUF is
+# a whole model.
 LAYER_SLICE_KEYS = "SPLASH_LAYER_SLICE_KEYS"
 
 
@@ -391,7 +391,8 @@ def layer_slice(metadata):
     values = [metadata.values.get(f"{prefix}.{key}") for key in ("start_layer", "end_layer", "original_block_count")]
     if any(type(value) is not int for value in values):
         raise ModelError(f"invalid GGUF layer slice: {prefix}.start_layer, end_layer and original_block_count")
-    first, end, total = values
+    first, last, total = values
+    end = last + 1
     arch = text_architecture(metadata)
     if ARCHITECTURES[arch].qsa_block is not None or ARCHITECTURES[arch].ple_layer is not None:
         raise ModelError(f"a GGUF of {arch} does not hold a slice of its layers")
