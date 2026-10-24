@@ -4,6 +4,8 @@
 #include "engine/FdTransport.hpp"
 #include "engine/Bootstrap.hpp"
 #include "engine/NativeArguments.hpp"
+#include "engine/StageServant.hpp"
+#include "model/Runtime.hpp"
 #include "engine/Status.hpp"
 #include "model/ModelDescriptor.hpp"
 
@@ -20,6 +22,7 @@
 #include <csignal>
 #include <chrono>
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 #include <filesystem>
 #include <limits.h>
@@ -301,9 +304,79 @@ void reportStartFailure(engine::FdTransport &transport,
   }
 }
 
+// The stage link's secret (NativeArguments::stageServe, stagePrevious).
+std::string stageSecret() {
+  const char *secret = std::getenv("SPLASH_STAGE_SECRET");
+  return secret ? secret : "";
+}
+
+// The model's layers the target runs: all of them, or its slice.
+std::pair<uint32_t, uint32_t> targetLayers(const model::ModelDescriptor &model) {
+  return std::visit([](const auto &layout) { return std::pair{layout.firstLayer, layout.firstLayer + layout.layers}; },
+                    model.target);
+}
+
+// The first stage of a split model (--stage-serve): the model's resources
+// and runtime, no native protocol; once they stand, "stage ready" on stdout,
+// then the stages after it, a thread per connection, until a stop signal.
+int runStageServant(const engine::NativeArguments &arguments) {
+  engine::RuntimeBootstrapConfig config = bootstrapConfig(arguments);
+  // Its prefill runs whole on the GPU, a chunk a command
+  // (model::Runtime::stagePrefill).
+  config.resources.aneFfn.enabled = false;
+  std::unique_ptr<engine::RuntimeResources> resources =
+      engine::RuntimeResources::create(config.resources, arguments.maxContext);
+  std::unique_ptr<model::RuntimeModel> runtime = model::createRuntime(resources->modelContext());
+  auto *stages = dynamic_cast<model::Runtime *>(runtime.get());
+  if (!stages) throw std::logic_error("the model's runtime runs no stage sequences");
+  resources->beginServing();
+  // Everything the servant allocates is a request's in service (the stage
+  // after holds it): the host's margins hold back none of it, as they do
+  // not an engine's request (engine::Serving); the budget and critical
+  // pressure still refuse it.
+  static_cast<void>(resources->memoryGovernor().setServing(true));
+  const auto [first, end] = targetLayers(arguments.model);
+  engine::StageServant servant(*stages, resources->cache(), stageSecret(), first, end);
+  std::signal(SIGPIPE, SIG_IGN);
+  engine::StageListener listener(arguments.stageServe);
+  logLine("Stage ready · layers ", first, " to ", end, " serve the next stage on 127.0.0.1:", arguments.stageServe);
+  std::fputs("stage ready\n", stdout);
+  std::fflush(stdout);
+  for (;;) {
+    auto socket = std::make_shared<engine::StageSocket>(listener.accept());
+    std::thread([&servant, socket] {
+      logLine("Stage link · a connection opened");
+      servant.serve(*socket);
+      logLine("Stage link · a connection closed");
+    }).detach();
+  }
+}
+
+// The previous stage of a model whose layers do not begin it
+// (--stage-previous): connected before the model loads, retried while the
+// previous stage starts.
+std::shared_ptr<model::StagePrevious> connectPreviousStage(uint16_t port, uint32_t firstLayer) {
+  const auto deadline = AwakeClock::now() + std::chrono::minutes(60);
+  for (;;) {
+    try {
+      return std::make_shared<engine::StageClient>(engine::connectStage(port), stageSecret(), firstLayer);
+    } catch (const engine::StageLinkError &) {
+      if (AwakeClock::now() >= deadline) throw;
+      std::this_thread::sleep_for(std::chrono::seconds(2));
+    }
+  }
+}
+
 int runNative(const engine::NativeArguments &arguments) {
+  if (arguments.stageServe)
+    return runStageServant(arguments);
   if (const std::filesystem::path caches = splashCaches(); !caches.empty())
     reportLegacyWeightCache(caches / "weights");
+  std::shared_ptr<model::StagePrevious> previousStage;
+  if (arguments.stagePrevious) {
+    logLine("Stage link · connecting to the previous stage on 127.0.0.1:", arguments.stagePrevious);
+    previousStage = connectPreviousStage(arguments.stagePrevious, targetLayers(arguments.model).first);
+  }
   engine::FdTransport transport(STDIN_FILENO, STDOUT_FILENO);
   ShutdownSignals signals(transport);
   MemoryPressureMonitor pressureMonitor(transport.controlNotifier());
@@ -323,6 +396,7 @@ int runNative(const engine::NativeArguments &arguments) {
     if (transport.shutdownRequested())
       return static_cast<int>(engine::NativeProcessExit::CleanEof);
     engine::RuntimeBootstrapConfig config = bootstrapConfig(arguments);
+    config.stagePrevious = previousStage;
     config.resources.memoryPressure = [&] { return pressureMonitor.pressure(); };
     config.resources.cancelled = [&] { return transport.shutdownRequested(); };
     config.nativeLoop.metrics = &metrics;

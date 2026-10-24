@@ -6,6 +6,7 @@
 #include "Qwen3_6Moe.hpp"
 #include "Qwen3_8.hpp"
 #include "QwenVision.hpp"
+#include "StagePrevious.hpp"
 #include "ops/PageStorage.hpp"
 #include "ops/ExecutionPlans.hpp"
 
@@ -129,6 +130,10 @@ struct RuntimeContext final {
   KvBlockCache *blockCache = nullptr;
   KvHistoryStream *historyStream = nullptr;
   VerifyRows verifyRows = VerifyRows::Auto;
+  // The stage before a target whose layers do not begin the model, which
+  // computes the rows its first layer reads (model/StagePrevious.hpp); null
+  // for every other target.
+  std::shared_ptr<StagePrevious> stagePrevious;
 };
 
 // Validates only the interface between independently defined target and draft

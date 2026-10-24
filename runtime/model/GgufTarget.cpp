@@ -38,6 +38,8 @@ GgufTargetLoader::GgufTargetLoader(metal::MetalBackend &backend, WeightImages &i
       gguf::planImages(planned_->source.file(), architecture, geometry,
                        {.streamExperts = experts.memoryBytes != 0, .streamTable = table.cacheBytes != 0});
   planned_->layers = geometry.layers;
+  planned_->head = geometry.hasHead();
+  planned_->embedding = geometry.holdsTokenTable();
   planned_->table = table;
   planned_->experts = experts;
 }
@@ -48,7 +50,7 @@ StreamedBlocks GgufTargetLoader::streamedExperts() const {
 }
 
 const gguf::Image *GgufTargetLoader::tablePlan() const noexcept {
-  const size_t index = planned_->layers + 2;
+  const size_t index = planned_->layers + planned_->head + planned_->embedding;
   return index < planned_->images.size() ? &planned_->images[index] : nullptr;
 }
 
@@ -56,7 +58,7 @@ WeightFile GgufTargetLoader::table() {
   const gguf::Image *plan = tablePlan();
   if (!plan) throw GgufError("the target has no table");
   if (plan->streamedRows) throw GgufError("the target's table streams");
-  return open(planned_->layers + 2);
+  return open(planned_->layers + planned_->head + planned_->embedding);
 }
 
 std::optional<GgufTargetLoader::StreamedTable> GgufTargetLoader::streamTable() const {
@@ -91,8 +93,14 @@ WeightFile GgufTargetLoader::layer(uint32_t index) {
   return open(index);
 }
 
-WeightFile GgufTargetLoader::head() { return open(planned_->layers); }
+WeightFile GgufTargetLoader::head() {
+  if (!planned_->head) throw GgufError("the target's layers do not end the model: it has no head");
+  return open(planned_->layers);
+}
 
-WeightFile GgufTargetLoader::embedding() { return open(planned_->layers + 1); }
+WeightFile GgufTargetLoader::embedding() {
+  if (!planned_->embedding) throw GgufError("the target's layers neither begin nor end the model: it has no token table");
+  return open(planned_->layers + planned_->head);
+}
 
 } // namespace splash::model

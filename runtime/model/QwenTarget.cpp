@@ -49,7 +49,7 @@ void requirePrefillStates(const QwenTargetGeometry &geometry, const QwenTargetPr
 } // namespace
 
 void QwenTargetGeometry::finish(std::span<const ops::BlockMoeWeights *const> moeBlocks,
-                                const ops::Projection &logits) {
+                                const ops::Projection *logits) {
   // The format of most routed expert weights, GGUF_FMT_COUNT for none.
   std::array<uint64_t, GGUF_FMT_COUNT> weights{};
   moeRegisterFormats = true;
@@ -62,7 +62,8 @@ void QwenTargetGeometry::finish(std::span<const ops::BlockMoeWeights *const> moe
   const auto most = std::max_element(weights.begin(), weights.end());
   moeExpertFormat = *most ? uint32_t(most - weights.begin()) : GGUF_FMT_COUNT;
   prefillProjections = decodeProjections;
-  include(logits);
+  // The head's projection, which a slice that does not end the model lacks.
+  if (logits) include(*logits);
   for (auto *shapes : {&prefillProjections, &decodeProjections, &gateUpProjections}) {
     std::sort(shapes->begin(), shapes->end());
     shapes->erase(std::unique(shapes->begin(), shapes->end()), shapes->end());
@@ -432,8 +433,11 @@ public:
         addCapture(step.graph, geometry_, *slot, output, 0, buffers.capturedTargetHidden, 0, step.rows);
     }
     requireLayerPartition(step.gdnLayer, step.attentionLayer);
-    addHeadBatch(step.graph, buffers.hidden[geometry_.layers & 1], buffers.finalHidden, buffers.logits, step.lanes,
-                 buffers.linearScratch);
+    // A slice whose layers do not end the model leaves its last layer's rows
+    // for the next stage, in hidden[layers & 1].
+    if (geometry_.hasHead())
+      addHeadBatch(step.graph, buffers.hidden[geometry_.layers & 1], buffers.finalHidden, buffers.logits,
+                   step.lanes, buffers.linearScratch);
   }
 
   void addHeadBatch(metal::CommandGraph &graph, metal::MetalBuffer hidden, metal::MetalBuffer finalHidden,

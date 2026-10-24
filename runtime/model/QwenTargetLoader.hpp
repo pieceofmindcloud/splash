@@ -101,7 +101,9 @@ readQwenTargetWeights(const Layout &layout, Files &&files, const BlockTargetForm
     result.files.push_back(file.record());
   }
 
-  {
+  // A slice of the model's layers reads the head only when it ends the
+  // model, and the token table when it begins it or holds the head.
+  if (layout.hasHead()) {
     WeightFile file = files.head();
     result.finalNorm = format.norm(file, layout.hiddenSize, "final-norm");
     result.logitsProjection =
@@ -112,7 +114,7 @@ readQwenTargetWeights(const Layout &layout, Files &&files, const BlockTargetForm
     file.finish();
     result.files.push_back(file.record());
   }
-  {
+  if (layout.holdsTokenTable()) {
     WeightFile file = files.embedding();
     result.tokenEmbedding = format.embedding(file, layout.vocabularySize, layout.hiddenSize);
     file.finish();

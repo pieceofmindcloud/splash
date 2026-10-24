@@ -15,6 +15,7 @@ from __future__ import annotations
 import collections
 import contextlib
 import math
+import os
 import struct
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -308,8 +309,12 @@ def model_config(metadata, vision=None):
         # family; the engine plans, sizes and loads them by this count.
         fields["num_experts"] = "expert_count"
     text = {name: metadata.positive(arch + "." + key) for name, key in fields.items()}
+    sliced = layer_slice(metadata)
+    if sliced is not None:
+        # The model's layers, of which the engine loads the slice.
+        text["layer_slice"] = {"first": sliced.first, "end": sliced.end}
     text.update(
-        num_hidden_layers=loaded_layers(metadata, arch),
+        num_hidden_layers=sliced.total if sliced else loaded_layers(metadata, arch),
         model_type=ARCHITECTURES[arch].model_type,
         vocab_size=len(metadata.require("tokenizer.ggml.tokens", list)),
     )
@@ -343,12 +348,59 @@ def scalar_metadata(metadata):
 
 def loaded_layers(metadata, arch):
     """The target's layer count without its MTP layers, which are never
-    loaded."""
+    loaded: the layers of a layer slice's file (layer_slice)."""
     layers = metadata.positive(arch + ".block_count")
     mtp = metadata.values.get(arch + ".nextn_predict_layers", 0)
     if type(mtp) is not int or not 0 <= mtp < layers:
         raise ModelError("invalid GGUF MTP layer count")
     return layers - mtp
+
+
+# The environment variable that names the metadata keys of a layer slice: a
+# GGUF that holds the model's layers START to LAST (inclusive) of ORIGINAL,
+# numbered from 0, states them as PREFIX.start_layer, PREFIX.end_layer (LAST)
+# and PREFIX.original_block_count, PREFIX being its value. Unset, every GGUF is
+# a whole model.
+LAYER_SLICE_KEYS = "SPLASH_LAYER_SLICE_KEYS"
+
+
+@dataclass(frozen=True)
+class LayerSlice:
+    """The model's layers [first, end) of total, which a GGUF holds."""
+
+    first: int
+    end: int
+    total: int
+
+    @property
+    def embeds_tokens(self):
+        return self.first == 0
+
+    @property
+    def has_head(self):
+        return self.end == self.total
+
+
+def layer_slice(metadata):
+    """The layer slice a GGUF holds (LAYER_SLICE_KEYS), or None for a whole
+    model. The slice's file holds end - first layers besides its MTP layers,
+    which only the slice that ends the model may keep."""
+    prefix = os.environ.get(LAYER_SLICE_KEYS)
+    if not prefix or prefix + ".start_layer" not in metadata.values:
+        return None
+    values = [metadata.values.get(f"{prefix}.{key}") for key in ("start_layer", "end_layer", "original_block_count")]
+    if any(type(value) is not int for value in values):
+        raise ModelError(f"invalid GGUF layer slice: {prefix}.start_layer, end_layer and original_block_count")
+    first, last, total = values
+    end = last + 1
+    arch = text_architecture(metadata)
+    if ARCHITECTURES[arch].qsa_block is not None or ARCHITECTURES[arch].ple_layer is not None:
+        raise ModelError(f"a GGUF of {arch} does not hold a slice of its layers")
+    mtp = metadata.values.get(arch + ".nextn_predict_layers", 0)
+    total -= mtp if end == total else 0
+    if not 0 <= first < end <= total or loaded_layers(metadata, arch) != end - first:
+        raise ModelError(f"invalid GGUF layer slice [{first}, {end}) of {total} layers")
+    return LayerSlice(first, end, total)
 
 
 def vision_config(vision):
@@ -619,8 +671,18 @@ def loaded_tensors(metadata):
     architecture = ARCHITECTURES[arch]
     period = metadata.positive(arch + ".full_attention_interval")
     tensors = dict(architecture.model_tensors)
+    # A layer slice's layer is the model's first + layer; it holds the token
+    # table when it begins the model or ends it (the DFlash2 draft beside the
+    # head embeds with it), and the head only when it ends it.
+    sliced = layer_slice(metadata)
+    first = sliced.first if sliced else 0
+    if sliced and not sliced.embeds_tokens and not sliced.has_head:
+        tensors.pop("token_embd.weight")
+    if sliced and not sliced.has_head:
+        for name in ("output_norm.weight", "output.weight"):
+            tensors.pop(name)
     for layer in range(loaded_layers(metadata, arch)):
-        if (layer + 1) % period == 0:
+        if (first + layer + 1) % period == 0:
             mixer = ATTENTION_TENSORS | architecture.attention_tensors
         else:
             mixer = GDN_TENSORS

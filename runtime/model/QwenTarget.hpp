@@ -128,7 +128,7 @@ struct QwenTargetGeometry final : QwenTargetDimensions {
   std::vector<ops::ProjectionShape> gateUpProjections;
 
   void include(const ops::Projection &projection) { decodeProjections.push_back(projection.shape()); }
-  void finish(std::span<const ops::BlockMoeWeights *const> moeBlocks, const ops::Projection &logits);
+  void finish(std::span<const ops::BlockMoeWeights *const> moeBlocks, const ops::Projection *logits);
 
   // The window the target serves with its RoPE scaling, which everything
   // sized by the context follows (ModelDescriptor::capabilities).
@@ -146,10 +146,12 @@ struct QwenTargetGeometry final : QwenTargetDimensions {
   captureLayers() const noexcept {
     return {captureLayerValues.data(), captureLayerCount};
   }
-  // The capture slot of `layer`, whose output the draft reads.
+  // The capture slot of the target's layer `layer`, whose output the draft
+  // reads: captureLayers names the model's layers, of which a slice of them
+  // holds those from firstLayer on.
   [[nodiscard]] constexpr std::optional<uint32_t> captureSlot(uint32_t layer) const noexcept {
     const auto layers = captureLayers();
-    const auto found = std::find(layers.begin(), layers.end(), layer);
+    const auto found = std::find(layers.begin(), layers.end(), firstLayer + layer);
     if (found == layers.end()) return std::nullopt;
     return static_cast<uint32_t>(found - layers.begin());
   }
@@ -175,7 +177,7 @@ struct QwenTargetGeometry final : QwenTargetDimensions {
     const auto captured = [&] {
       if (!captureLayerCount || captureLayerCount > ExecutionLimits::maximumDraftTargetLayers) return false;
       const auto ids = captureLayers();
-      return std::ranges::adjacent_find(ids, std::ranges::greater_equal{}) == ids.end() && ids.back() < layers;
+      return std::ranges::adjacent_find(ids, std::ranges::greater_equal{}) == ids.end() && ids.back() < modelLayers();
     };
     return captured() && stateLayout.layers + kvLayout.attentionLayers == layers &&
            gdnShape().valid() &&
@@ -389,7 +391,7 @@ template <class Weights>
     if (const ops::BlockMoeWeights *block = qwenMoeBlock(layer)) moeBlocks.push_back(block);
   }
   includeFamilyProjections(geometry, weights);
-  geometry.finish(moeBlocks, weights.logitsProjection);
+  geometry.finish(moeBlocks, weights.layout.hasHead() ? &weights.logitsProjection : nullptr);
   return geometry;
 }
 

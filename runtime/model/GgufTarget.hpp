@@ -79,6 +79,10 @@ private:
     // (gguf::planImages).
     std::vector<gguf::Image> images;
     uint32_t layers = 0;
+    // Whether the images hold the head's and the token table's: a slice of
+    // the model's layers holds each only at its end of the model.
+    bool head = true;
+    bool embedding = true;
     SparseRowStoreOptions table;
     ExpertStoreOptions experts;
   };

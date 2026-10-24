@@ -90,6 +90,16 @@ def parse_model_id(value):
     return value
 
 
+def parse_stage_port(value):
+    try:
+        port = int(value)
+    except ValueError:
+        port = 0
+    if not 0 < port < 65536:
+        raise argparse.ArgumentTypeError("must be a TCP port")
+    return port
+
+
 def parse_max_context(value):
     """'auto' (None), or a token count with an optional _CONTEXT_UNITS suffix,
     up to MAX_YARN_CONTEXT_TOKENS: the engine serves one past the native
@@ -708,6 +718,19 @@ SERVE_OPTIONS = (
             "model's do (default: auto, where a verify budget learned from "
             "earlier cycles chooses a MoE model's rows, which is faster but "
             "lets those outputs differ from run to run)",
+        ),
+    ),
+    ServeOption(
+        "--stage-previous",
+        "network",
+        dict(
+            type=parse_stage_port,
+            default=None,
+            metavar="PORT",
+            help="serve a model whose GGUF holds a slice of its layers that does not "
+            "begin it: the stage of the layers before them serves on "
+            "127.0.0.1:PORT (an engine started with --stage-serve), its secret in "
+            "SPLASH_STAGE_SECRET",
         ),
     ),
     ServeOption(

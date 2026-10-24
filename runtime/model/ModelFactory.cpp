@@ -104,7 +104,14 @@ LoadedModel loadModel(metal::MetalBackend &backend,
         throw std::invalid_argument("unknown target source");
       },
       result.descriptor.target);
-  result.draft = loadDFlashDraftWeights(backend, draft, result.descriptor.draft);
+  // The DFlash2 draft drafts beside the head: a slice of the model's layers
+  // that does not end the model loads none of its weights, only its layout.
+  const bool drafts =
+      std::visit([](const auto &layout) { return layout.hasHead(); }, result.descriptor.target);
+  if (drafts)
+    result.draft = loadDFlashDraftWeights(backend, draft, result.descriptor.draft);
+  else
+    result.draft.layout = result.descriptor.draft;
   result.vision = loadVisionWeights(backend, images, vision.get());
 
   std::vector<WeightFileRecord> records(result.targetFiles().begin(),

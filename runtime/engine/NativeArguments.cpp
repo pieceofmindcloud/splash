@@ -1,5 +1,7 @@
 #include "engine/NativeArguments.hpp"
 
+#include <cstdlib>
+
 #include <charconv>
 #include <cmath>
 #include <limits>
@@ -176,10 +178,23 @@ NativeArguments parseNativeArguments(int argc, const char *const *argv) {
       result.verifyRows = value == "all" ? model::VerifyRows::All : model::VerifyRows::Auto;
     } else if (option == "--relaunch-context") {
       relaunchContext = value;
+    } else if (option == "--stage-serve" || option == "--stage-previous") {
+      // A loopback port of the stage link (engine/StageLink.hpp), whose
+      // secret is SPLASH_STAGE_SECRET's.
+      const std::string text(value);
+      char *end = nullptr;
+      const unsigned long port = std::strtoul(text.c_str(), &end, 10);
+      if (text.empty() || *end || !port || port > 65535)
+        throw UsageError(std::string(option) + " requires a port");
+      (option == "--stage-serve" ? result.stageServe : result.stagePrevious) = static_cast<uint16_t>(port);
     } else {
       throw UsageError("unexpected argument " + std::string(option));
     }
   }
+  if (result.stageServe && result.stagePrevious)
+    throw UsageError("--stage-serve and --stage-previous are the two ends of a link");
+  if ((result.stageServe || result.stagePrevious) && !std::getenv("SPLASH_STAGE_SECRET"))
+    throw UsageError("a stage link needs its secret in SPLASH_STAGE_SECRET");
   if (result.persistentCache && !result.maxCacheDisk.automatic && !result.maxCacheDisk.bytes)
     throw UsageError("--persistent-cache requires an SSD cache, which MAX_CACHE_DISK_BYTES 0 turns off");
   if (result.maxCacheDiskWritesBytes && !result.maxCacheDisk.automatic && !result.maxCacheDisk.bytes)
